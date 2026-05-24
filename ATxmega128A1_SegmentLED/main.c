@@ -110,7 +110,7 @@ unsigned short gu16_parameterWord = PARAMETER_WORD;
 #define FACTORY_PARASET_PWD		1234
 #define FACTORY_PASSWORD		1000
 #define DFU_PASSWORD			3123
-#define SOFT_VER				910  //means 9.10
+#define SOFT_VER				920  //means 9.20
 #define NO_OF_ACKPWD			15
 #define NO_OF_XBEE_MAC			2
 #define NO_OF_DEVICES_IN_GROUP	5
@@ -147,7 +147,7 @@ unsigned short gu16_parameterWord = PARAMETER_WORD;
 #define PASCAL_PER_CNT			8.0
 
 
-#define RAW_DP_CNT_IND			5
+#define RAW_DP_CNT_IND			10
 #define XBEE_RX_IND_MAX			20
 #define RX_IND_MAX				100
 #define TX_IND_MAX				100
@@ -657,6 +657,8 @@ volatile static struct bits
 	uint8_t sec_flag : 1;	
 	uint8_t msec500_flag : 1;	
 	uint8_t msec250_flag : 1;
+	uint8_t msec100_flag : 1;
+	uint8_t msec50_flag : 1;
 	uint8_t buzzerStart : 1;
 	uint8_t UARTChanged : 1;	
 	uint8_t keybit : 1;
@@ -702,6 +704,8 @@ volatile static struct bits
 	uint8_t buzzeralert : 1;
 	uint8_t autoSendResponse : 1;
 	uint8_t triggerXbeeReset : 1;
+	uint8_t DP1_limit : 2;
+	uint8_t DP2_limit : 2;
 	
 }b={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 
@@ -789,10 +793,10 @@ uint8_t seg_code[]=
 	0x78,  //code for t
 	0x50,  //code for r
 	0x73,  //code for P
-	0x10,  //code for I
+	0x30,  //code for I
 	0x71,  //code for F
 	0x3E,  //code for U
-	0x74,  //code for H
+	0x76,  //code for H
 	0x15,  //code for M
 	0x6E,  //code for small y
 	0x2A,  //code for V
@@ -871,14 +875,13 @@ union
 unsigned long testEpochTime1;
 
 uint8_t Raw_pressure_cnt_ind1=0;
-unsigned short Raw_pressure_cnt1[RAW_DP_CNT_IND];
-unsigned long Avg_Raw_pressure_cnt1=0;
+signed short Raw_pressure_cnt1[RAW_DP_CNT_IND];
 
 uint8_t Raw_pressure_cnt_ind2=0;
-unsigned short Raw_pressure_cnt2[RAW_DP_CNT_IND];
-unsigned long Avg_Raw_pressure_cnt2=0;
+signed short Raw_pressure_cnt2[RAW_DP_CNT_IND];
 
 float Dpressure1=0.0,Dpressure2=0.0;
+float LastDpressure1=0.0,LastDpressure2=0.0;
 
 uint8_t FirstTimeCheck=0;	
 uint8_t progTimeout=0;
@@ -1548,7 +1551,7 @@ int main(void)
 			b.msec250_flag=0;
 		}
 		
-		if(b.msec500_flag)
+		if(b.msec50_flag)
 		{
 			//Read Differential Pressure -----------------------------------------
 			if(gu16_parameterWord & ENABLE_DP1)
@@ -1587,7 +1590,7 @@ int main(void)
 				DP_StartUpTimer=0;
 			}
 			
-			b.msec500_flag=0;
+			b.msec50_flag=0;
 		}
 		//====================================================
 		if(gu16_parameterWord & ENABLE_LCD)
@@ -5821,17 +5824,13 @@ void Init_Timer0(void)
 	//*/
 //}
 
-unsigned short lastdifferanceDP1=0,lastdifferanceDP2=0;
-uint8_t gu8_DP2StandbyTimer = 0;
-
 void ReadDiffPressure1(void)
 {	
 	unsigned short differanceDP=0;
-	
-	Dpressure1=0.0;
-	
 	uint8_t DpError=0;
 	
+	Dpressure1=0.0;
+
 	//Start Command Mode ----------------------------------
 	I2C4_Start();						// Start condition
 	Write_Byte_I2C4(0x51); 				// Write device address
@@ -5858,9 +5857,6 @@ void ReadDiffPressure1(void)
 		
 		gu8_Dp1AlarmSensingTimer=0;
 		
-		//DP_StartUpTimer=S_STABLE_TIME;
-		Avg_Raw_pressure_cnt1=0x3FFF;
-		
 		#ifdef DEBUG_DP1
 		opstr(1,"DP1 ERROR  ");
 		#endif
@@ -5869,45 +5865,14 @@ void ReadDiffPressure1(void)
 	{
 		b.DP1_NC=0;
 		
-		Raw_pressure_cnt1[Raw_pressure_cnt_ind1++] = differanceDP;
-		if(Raw_pressure_cnt_ind1>=RAW_DP_CNT_IND) Raw_pressure_cnt_ind1=0;
-		
-		signed long lu32_temp=0;
-		
-		lu32_temp = 0;
-		for(i=0;i<RAW_DP_CNT_IND;i++) lu32_temp += Raw_pressure_cnt1[i];
-		lu32_temp /= RAW_DP_CNT_IND;
-
-		if((Avg_Raw_pressure_cnt1<=(lu32_temp+5)) && (Avg_Raw_pressure_cnt1>=(lu32_temp-5)))
-		{
-			Avg_Raw_pressure_cnt1=(lu32_temp+Avg_Raw_pressure_cnt1+Avg_Raw_pressure_cnt1)/3;
-		}
-		else
-		{
-			Avg_Raw_pressure_cnt1=lu32_temp;
-		}
-		
-		Avg_Raw_pressure_cnt1 -= 1638;
-
-		RealDpressure1 = (float)Avg_Raw_pressure_cnt1;
-		
-		if(gu16_parameterWord & DIFP1_ABSP1)
-		{
-			RealDpressure1 *= 0.0762951094834821;//0.1496910048065919;
-			RealDpressure1 -= 500;//981;
-		}
-		else
-		{
-			RealDpressure1 *= 0.0762951094834821;//0.1496910048065919;
-			RealDpressure1 -= 500;//981;
-		}
+		RealDpressure1 = (float)differanceDP-1638;	
+		RealDpressure1 *= 0.0762951094834821;//0.1496910048065919;
+		RealDpressure1 -= 500;//981;
 		
 		float f32_temp=0;
 		f32_temp = RealDpressure1;
 		f32_temp -= DP1_Cal_float_Value_F;
 		f32_temp -= DP1_Cal_float_Value_C;
-		lu32_temp = f32_temp;
-		f32_temp = lu32_temp;
 		
 		if((f32_temp > 200) && (f32_temp <= 300)) f32_temp -= 1;
 		else if((f32_temp > 300) && (f32_temp <= 400)) f32_temp -= 2;
@@ -5917,11 +5882,6 @@ void ReadDiffPressure1(void)
 		else if((f32_temp > 700) && (f32_temp <= 800)) f32_temp -= 6;
 		else if(f32_temp > 800) f32_temp -= 7;
 		
-		if((f32_temp<1.0) && (f32_temp>-1.0))
-		{
-			f32_temp = 0;
-		}
-			
 		Dpressure1 = f32_temp;
 		
 		Dpressure1 = Kalman_Update(&Kalman[0], Dpressure1);
@@ -5943,8 +5903,47 @@ void ReadDiffPressure1(void)
 			}
 		}
 		
-		if(Dpressure1 > f32_dp_limit[0]) Dpressure1 = f32_dp_limit[0];
-		if(Dpressure1 < -f32_dp_limit[0]) Dpressure1 = -f32_dp_limit[0];
+		//---------------------------------------------------------------------------
+		/*Raw_pressure_cnt1[Raw_pressure_cnt_ind1++] = (Dpressure1 * 10);
+		if(Raw_pressure_cnt_ind1>=RAW_DP_CNT_IND) Raw_pressure_cnt_ind1=0;
+		
+		signed long lu32_temp=0;
+		
+		lu32_temp = 0;
+		for(i=0;i<RAW_DP_CNT_IND;i++) lu32_temp += Raw_pressure_cnt1[i];
+		lu32_temp /= RAW_DP_CNT_IND;       
+		
+		Dpressure1 = (float)lu32_temp/10;
+		*/
+		
+		if((Dpressure1<1.0) && (Dpressure1>-1.0))
+		{
+			Dpressure1 = 0;
+		}
+		
+		if(Dpressure1 > f32_dp_limit[0]) 
+		{
+			Dpressure1 = f32_dp_limit[0];
+			b.DP1_limit = 1;
+		}
+		else if(Dpressure1 < -f32_dp_limit[0]) 
+		{
+			Dpressure1 = -f32_dp_limit[0];
+			b.DP1_limit = 2;
+		}
+		else
+		{
+			b.DP1_limit = 0;
+		}
+		
+		if(abs(LastDpressure1-Dpressure1)>0.1)
+		{
+			LastDpressure1 = Dpressure1;
+		}
+		else
+		{
+			Dpressure1 = LastDpressure1;
+		}
 		
 		if(!DP_StartUpTimer)
 		{
@@ -6065,10 +6064,9 @@ void ReadDiffPressure1(void)
 void ReadDiffPressure2(void)
 {
 	unsigned short differanceDP=0;
-
-	Dpressure2=0.0;
-	
 	uint8_t DpError=0;
+	
+	Dpressure2=0.0;
 	
 	//Start Command Mode ----------------------------------
 	I2C2_Start();						// Start condition
@@ -6096,9 +6094,6 @@ void ReadDiffPressure2(void)
 		
 		gu8_Dp2AlarmSensingTimer=0;
 		
-		//DP_StartUpTimer=S_STABLE_TIME;
-		Avg_Raw_pressure_cnt2=0x3FFF;
-		
 		#ifdef DEBUG_DP2
 		opstr(1,"DP2 ERROR  ");
 		#endif
@@ -6107,37 +6102,14 @@ void ReadDiffPressure2(void)
 	{
 		b.DP2_NC=0;
 
-		Raw_pressure_cnt2[Raw_pressure_cnt_ind2++] = differanceDP;
-		if(Raw_pressure_cnt_ind2>=RAW_DP_CNT_IND) Raw_pressure_cnt_ind2=0;
-		
-		signed long lu32_temp=0;
-		
-		lu32_temp = 0;
-		for(i=0;i<RAW_DP_CNT_IND;i++) lu32_temp += Raw_pressure_cnt2[i];
-		lu32_temp /= RAW_DP_CNT_IND;       
-
-		if((Avg_Raw_pressure_cnt2<=(lu32_temp+5)) && (Avg_Raw_pressure_cnt2>=(lu32_temp-5)))
-		{
-			Avg_Raw_pressure_cnt2=(lu32_temp+Avg_Raw_pressure_cnt2+Avg_Raw_pressure_cnt2)/3;
-		}
-		else
-		{
-			Avg_Raw_pressure_cnt2=lu32_temp;
-		}
-
-		Avg_Raw_pressure_cnt2 -= 1638;
-
-		RealDpressure2 = (float)Avg_Raw_pressure_cnt2;			
-		RealDpressure2 *= 0.0762951094834821;//0.1496910048065919;//0762951094834821 original  by changing it will  change DP value 0762951094834821
+		RealDpressure2 = (float)differanceDP-1638;			
+		RealDpressure2 *= 0.0762951094834821;//0.1496910048065919;//0762951094834821 
 		RealDpressure2 -= 500;//981; pressure range  
 		
 		float f32_temp=0;
 		f32_temp = RealDpressure2;
 		f32_temp -= DP2_Cal_float_Value_F;
 		f32_temp -= DP2_Cal_float_Value_C;
-		
-		lu32_temp = f32_temp;
-		f32_temp = lu32_temp;
 		
 		if((f32_temp > 200) && (f32_temp <= 300)) f32_temp -= 1;
 		else if((f32_temp > 300) && (f32_temp <= 400)) f32_temp -= 2;
@@ -6147,11 +6119,6 @@ void ReadDiffPressure2(void)
 		else if((f32_temp > 700) && (f32_temp <= 800)) f32_temp -= 6;
 		else if(f32_temp > 800) f32_temp -= 7;
 		
-		if((f32_temp<1.0) && (f32_temp>-1.0))
-		{
-			f32_temp = 0;
-		}
-			
 		Dpressure2 = f32_temp;
 		
 		Dpressure2 = Kalman_Update(&Kalman[1], Dpressure2);
@@ -6172,9 +6139,50 @@ void ReadDiffPressure2(void)
 				}
 			}
 		}
+
+		//---------------------------------------------------------------------------
+		/*Raw_pressure_cnt2[Raw_pressure_cnt_ind2++] = (Dpressure2 * 10);
+		if(Raw_pressure_cnt_ind2>=RAW_DP_CNT_IND) Raw_pressure_cnt_ind2=0;
 		
-		if(Dpressure2 > f32_dp_limit[1]) Dpressure2 = f32_dp_limit[1];
-		if(Dpressure2 < -f32_dp_limit[1]) Dpressure2 = -f32_dp_limit[1];
+		signed long lu32_temp=0;
+		
+		lu32_temp = 0;
+		for(i=0;i<RAW_DP_CNT_IND;i++) lu32_temp += Raw_pressure_cnt2[i];
+		lu32_temp /= RAW_DP_CNT_IND;       
+		
+		Dpressure2 = (float)lu32_temp/10;
+		*/
+		
+		if((Dpressure2<1.0) && (Dpressure2>-1.0))
+		{
+			Dpressure2 = 0;
+		}
+		
+		if(Dpressure2 > f32_dp_limit[1]) 
+		{
+			Dpressure2 = f32_dp_limit[1];
+			b.DP2_limit = 1;
+		}
+		else if(Dpressure2 < -f32_dp_limit[1]) 
+		{
+			Dpressure2 = -f32_dp_limit[1];
+			b.DP2_limit = 2;
+		}
+		else
+		{
+			b.DP2_limit = 0;
+		}
+		
+		if(abs(LastDpressure2-Dpressure2)>0.1)
+		{
+			LastDpressure2 = Dpressure2;
+		}
+		else
+		{
+			Dpressure2 = LastDpressure2;
+		}
+		
+		//---------------------------------------------------------------------------
 		
 		if(!DP_StartUpTimer)
 		{
@@ -6318,7 +6326,7 @@ void Init_InternalRTC(void)
 {
 	while(RTC.STATUS & RTC_SYNCBUSY_bm);
 	
-	RTC.PER = 256;
+	RTC.PER = 51;//102;//256;//511;
 	RTC.CNT = 0;
 	RTC.COMP = 0;
 	RTC.CTRL = RTC_PRESCALER_DIV1_gc;
@@ -6327,12 +6335,19 @@ void Init_InternalRTC(void)
 
 ISR(RTC_OVF_vect)
 {
-	static unsigned char mcnt=0,mcnt1=0;
+	static uint8_t mcnt=0,mcnt1=0,mcnt2=0;
 	
-	b.msec250_flag = 1;
+	b.msec50_flag = 1;
+	
+	mcnt2++;
+	if(mcnt2>=5)
+	{
+		mcnt2=0;
+		b.msec250_flag = 1;
+	}
 	
 	mcnt1++;
-	if(mcnt1>=2)
+	if(mcnt1>=10)
 	{
 		mcnt1=0;
 		
@@ -6356,7 +6371,7 @@ ISR(RTC_OVF_vect)
 	
 	//---------------------------------------------
 	mcnt++;
-	if(mcnt>=4)
+	if(mcnt>=20)
 	{
 		mcnt=0;
 		b.sec_flag=1;
@@ -7189,7 +7204,7 @@ void InitLEDController(void)
 	data[3] = r;
 	
 	data[5] = 19;
-	data[6] = 1;
+	data[6] = 2;
 						
 	disp_value();
 	
@@ -7927,33 +7942,45 @@ void conv_value(void)
 							//----------------------------------------------------
 							tempfloat = Dpressure2;
 						
-							if(tempfloat<0.0)
+							if(!b.DP2_limit)
 							{
-								tempfloat *= (-1.0);
-								
-								if(DP2_Alrm_ON) 
+								if(tempfloat<0.0)
 								{
-									lcd.Sym_DP_MIN_ALM = 1;
+									tempfloat *= (-1.0);
+									
+									if(DP2_Alrm_ON) 
+									{
+										lcd.Sym_DP_MIN_ALM = 1;
+									}
+									else
+									{
+										lcd.Sym_DP_MIN = 1;
+									}
+								}
+								//----------------------------------------------------
+								if(tempfloat < 10.0)
+								{
+									convert_float(tempfloat,&data[5],1);
+								}
+								else if(tempfloat < 100.0)
+								{
+									convert_float(tempfloat,&data[4],1);
 								}
 								else
 								{
-									lcd.Sym_DP_MIN = 1;
+									convert_float(tempfloat,&data[4],0);
 								}
 							}
-							//----------------------------------------------------
-							if(tempfloat < 10.0)
+							else if(b.DP2_limit==1)
 							{
-								convert_float(tempfloat,&data[5],1);
+								data[5]=H;
+								data[6]=I;
 							}
-							else if(tempfloat < 100.0)
+							else if(b.DP2_limit==2)
 							{
-								convert_float(tempfloat,&data[4],1);
+								data[5]=L;
+								data[6]=0;
 							}
-							else
-							{
-								convert_float(tempfloat,&data[4],0);
-							}
-						
 							//----------------------------------------------------
 						}
 						lcd.Sym_DP_UNIT = 1;
@@ -9629,8 +9656,8 @@ void boot_data(void)
 			f32_dp_sw_factor[i]=0.0;
 			eeprom_busy_wait();  eeprom_write_word((unsigned int*)(DP_SW_FACT_ADDR+(i*2)),su16_dp_sw_factor[i]);
 			
-			u16_dp_limit[i]=10000;
-			f32_dp_limit[i]=1000.0;
+			u16_dp_limit[i]=2500;
+			f32_dp_limit[i]=250.0;
 			eeprom_busy_wait();  eeprom_write_word((unsigned int*)(DP_LIMIT_ADDR+(i*2)),u16_dp_limit[i]);
 		}
 
@@ -10199,9 +10226,9 @@ void boot_data(void)
 			f32_dp_sw_factor[i]=(float)su16_dp_sw_factor[i]/100.0;
 			
 			u16_dp_limit[i]  = eeprom_read_word ((unsigned int*)(DP_LIMIT_ADDR+(i*2)));
-			if((u16_dp_limit[i]<500) || (u16_dp_limit[i]>10000))
+			if((u16_dp_limit[i]<500) || (u16_dp_limit[i]>9990))
 			{
-				u16_dp_limit[i]=10000;
+				u16_dp_limit[i]=2500;
 				eeprom_busy_wait();  eeprom_write_word((unsigned int*)(DP_LIMIT_ADDR+(i*2)),u16_dp_limit[i]);
 			}
 			f32_dp_limit[i]=(float)u16_dp_limit[i]/10.0;

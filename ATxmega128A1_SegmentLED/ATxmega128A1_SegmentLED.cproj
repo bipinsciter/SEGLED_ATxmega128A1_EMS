@@ -157,7 +157,7 @@
         </avrgcc.assembler.general.IncludePaths>
       </AvrGcc>
     </ToolchainSettings>
-    <OutputFileName>Niyama_ATxmega128A1_APP_SEGLED_V9_1</OutputFileName>
+    <OutputFileName>Niyama_ATxmega128A1_APP_SEGLED_V9_2</OutputFileName>
     <OutputFileExtension>.elf</OutputFileExtension>
     <OutputType>Executable</OutputType>
   </PropertyGroup>
